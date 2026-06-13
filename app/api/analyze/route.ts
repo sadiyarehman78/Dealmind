@@ -113,28 +113,19 @@ const responseSchemas = {
 
 function extractText(response: { text?: string }) {
   const text = response.text?.trim();
-
-  if (!text) {
-    throw new Error("Gemini returned an empty response.");
-  }
-
+  if (!text) throw new Error("Gemini returned an empty response.");
   return text;
 }
 
 function parseJsonResponse(content: string) {
   const trimmed = content.trim();
-
-  if (!trimmed) {
-    throw new Error("Gemini returned an empty response.");
-  }
+  if (!trimmed) throw new Error("Gemini returned an empty response.");
 
   try {
     return JSON.parse(trimmed) as unknown;
   } catch {
     const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fencedMatch) {
-      return JSON.parse(fencedMatch[1].trim()) as unknown;
-    }
+    if (fencedMatch) return JSON.parse(fencedMatch[1].trim()) as unknown;
 
     const objectStart = trimmed.indexOf("{");
     const objectEnd = trimmed.lastIndexOf("}");
@@ -197,24 +188,13 @@ async function generateModeContent(ai: GoogleGenAI, mode: Mode, input: string) {
       config,
     });
   } catch (error) {
-    if (!shouldFallbackToLite(error)) {
-      throw error;
-    }
-
+    if (!shouldFallbackToLite(error)) throw error;
     return ai.models.generateContent({
       model: geminiFallbackModel,
       contents: prompts[mode](input),
       config,
     });
   }
-}
-
-async function readErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
 }
 
 export async function POST(request: Request) {
@@ -242,37 +222,30 @@ export async function POST(request: Request) {
 
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const completion = await generateModeContent(ai, mode, input);
-
     const content = extractText(completion);
 
     let result: unknown;
     try {
       result = parseJsonResponse(content);
-    } catch (err) {
+    } catch {
       try {
         result = await repairJsonResponse(ai, mode, content);
-      } catch (repairErr) {
+      } catch {
         return Response.json({ error: "Gemini returned invalid JSON." }, { status: 500 });
       }
     }
 
-    // Some prompts may wrap respond outputs under { responses: [...] }
-    let maybe: unknown = result;
-    if (mode === "Respond" && typeof result === "object" && result !== null && "responses" in result) {
-      maybe = (result as Record<string, unknown>)["responses"];
-    }
-
-    const validated = validateModeResult(mode, maybe);
+    // Keep result as-is — validator expects { responses: [...] } for Respond mode
+    const validated = validateModeResult(mode, result);
     if (!validated.success) {
-      return Response.json({ error: `Invalid response shape: ${validated.error}`, raw: result }, { status: 500 });
+      return Response.json(
+        { error: `Invalid response shape: ${validated.error}`, raw: result },
+        { status: 500 },
+      );
     }
 
     return Response.json(validated.data);
   } catch (err) {
-    // Log full error server-side for debugging
-    // In development, return the error message to the client to aid debugging.
-    // Do NOT leak sensitive data in production.
-    // eslint-disable-next-line no-console
     console.error("/api/analyze error:", err);
     const message = err instanceof Error ? err.message : String(err);
     return Response.json(

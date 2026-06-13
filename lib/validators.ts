@@ -50,7 +50,7 @@ export const PlaybookDataSchema = z.object({
 
 export const AnalysisResultSchemas = {
   Analyze: AnalyzeDataSchema,
-  Respond: z.array(RespondItemSchema),
+  Respond: z.object({ responses: z.array(RespondItemSchema) }).transform((val) => val.responses),
   Pricing: PricingDataSchema,
   Playbook: PlaybookDataSchema,
 } as const;
